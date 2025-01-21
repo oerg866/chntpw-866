@@ -29,6 +29,9 @@ cpnt: cpnt.o
 reged: reged.o ntreg.o edlib.o
 	$(CC) $(CFLAGS) -o reged reged.o ntreg.o edlib.o
 
+reged.static: reged.o ntreg.o edlib.o
+	$(CC) -static $(CFLAGS) -o reged.static reged.o ntreg.o edlib.o
+
 samusrgrp: samusrgrp.o ntreg.o libsam.o
 	$(CC) $(CFLAGS) -o samusrgrp samusrgrp.o ntreg.o libsam.o
 
