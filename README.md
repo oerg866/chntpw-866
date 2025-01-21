@@ -2,7 +2,7 @@
 
 The Offline Windows Password Editor
 
-© 2021 Mina Her, 1997-2014 Petter Nordahl-Hagen
+© 2025 E. Voirin, © 2021 Mina Her, © 1997-2014 Petter Nordahl-Hagen
 
 This is free software, licensed under the following:
 
