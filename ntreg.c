@@ -5,6 +5,7 @@
  *           no rename of keys or values yet..
  *           also contains some minor utility functions (string handling etc) for now
  *
+ * 2025-jan: Add support for deleting registry keys and values via .reg file import
  * 2014-jan: openhive() now more compatible with build on non-unix?
  * 2013-aug: Enter buil-in buffer debugger only if in trace mode, else return error or abort()
  * 2013-may-aug: Fixed critical bug in del_value which could
@@ -55,6 +56,7 @@
  *****
  *
  * NTREG - Window registry file reader / writer library
+ * Copyright (c) 2025 E. Voirin.
  * Copyright (c) 2021-2024 Mina Her.
  * Copyright (c) 1997-2014 Petter Nordahl-Hagen.
  *
@@ -92,7 +94,7 @@
 #define ZEROFILL      1  /* Fill blocks with zeroes when allocating and deallocating */
 #define ZEROFILLONLOAD  0  /* Fill blocks marked as unused/deallocated with zeroes on load. FOR DEBUG */
 
-const char ntreg_version[] = "ntreg lib routines, v1.0.3, (c) 2021-2024 Mina Her, 1997-2014 Petter N Hagen";
+const char ntreg_version[] = "ntreg lib routines, v1.0.4, (c) 2025 E.Voirin, (c) 2021-2024 Mina Her, 1997-2014 Petter N Hagen";
 
 const char *val_types[REG_MAX+1] = {
   "REG_NONE", "REG_SZ", "REG_EXPAND_SZ", "REG_BINARY", "REG_DWORD",       /* 0 - 4 */
@@ -3952,92 +3954,150 @@ void import_reg(struct hive *hdesc, char *filename, char *prefix)
         }
         memcpy(walstr + wl, wline, wl);
       }
-
-
-
-    } else {    /* End continuation, store built up value */
+    } else { /* End continuation, store built up value */
       if (valname) {
-        //      printf("import_reg: end of value %s, result string: %s\n\n",valname,valstr);
+        //     printf("import_reg: end of value %s, result string: %s\n\n",valname,valstr);
+
+        // Check if we have value "-" which means delete value
+        int val_to_be_deleted = 0;
+
+        if (0 == strcmp(valstr, "-")) {
+          // We should delete the value
+          val_to_be_deleted = 1;
+        }
 
         type = parse_valuestring(valstr, walstr, l, wide, &valbinbuf);
 
         //      printf("import_reg: got value type = %d\n",type);
         //      printf("import_reg: data lenght    = %d\n",(*valbinbuf).len);
 
-        VERBF(hdesc,"  Value <%s> of type %d length %d",valname,type,(*valbinbuf).len);
+        oldtype = get_val_type(hdesc, nk + 4, valname, TPF_VK_ABS | TPF_EXACT);
 
-        oldtype = get_val_type(hdesc, nk + 4, valname, TPF_VK_ABS|TPF_EXACT);
+        VERBF(hdesc, "  Value <%s> of type %d length %d oldtype %d", valname, type, (*valbinbuf).len, oldtype);
 
+        if (!val_to_be_deleted) { /* Value not to be deleted -> Create or change */
+          if (oldtype == -1) {  /* Not to be deleted & doesn't exist -> create value */
+            //       printf("Value <%s> not found, creating it new\n",valname);
+            plainname = str_dup(valname);
+            de_escape(plainname, 0);
+            // printf("de-escaped to <%s> creating it new\n",plainname);
+            add_value(hdesc, nk + 4, plainname, type);
+            oldtype = get_val_type(hdesc, nk + 4, valname, TPF_VK_ABS | TPF_EXACT);
+            FREE(plainname);
+            VERB(hdesc, " [CREATED]");
+          }
 
-        if (oldtype == -1) {
-          //      printf("Value <%s> not found, creating it new\n",valname);
-          plainname = str_dup(valname);
-          de_escape(plainname,0);
-          // printf("de-escaped to <%s> creating it new\n",plainname);
-          add_value(hdesc, nk + 4, plainname, type);
-          oldtype = get_val_type(hdesc, nk + 4, valname, TPF_VK_ABS|TPF_EXACT);
-          FREE(plainname);
-          VERB(hdesc," [CREATED]");
+          if (oldtype != type) {
+            fprintf(stderr, "ERROR: import_reg: unable to change value <%s>, new type is %d while old is %d\n", valname, type, oldtype);
+            bailout = 1;
+          } else {
+            put_buf2val(hdesc, valbinbuf, nk + 4, valname, type, TPF_VK_ABS | TPF_EXACT);
 
-        }
-
-        if (oldtype != type) {
-          fprintf(stderr,"ERROR: import_reg: unable to change value <%s>, new type is %d while old is %d\n",valname,type,oldtype);
-          bailout = 1;
+            numkeyvals++;
+            numtotvals++;
+          }
         } else {
+          if (val_to_be_deleted && oldtype != -1) { /* Value to be deleted and does exist -> Delete */
+            del_value(hdesc, nk + 4, valname, TPF_EXACT);
 
-          VERB(hdesc,"\n");
-          put_buf2val(hdesc, valbinbuf, nk + 4, valname, type, TPF_VK_ABS|TPF_EXACT);
-
-          numkeyvals++;
-          numtotvals++;
-
-          FREE(valbinbuf);
-          FREE(valstr);
-          FREE(valname);
-          FREE(walstr);
+            if (-1 != get_val_type(hdesc, nk + 4, valname, TPF_VK_ABS | TPF_EXACT)) { /* Value still exists -> this is bad! */
+              fprintf(stderr, "ERROR: import_reg: unable to delete value <%s>\n", valname);
+              bailout = 1;
+            }
+            VERB(hdesc, "[DELETED]");
+          }
         }
+
+        VERB(hdesc, "\n");
+
+        FREE(valbinbuf);
+        FREE(valstr);
+        FREE(valname);
+        FREE(walstr);
       }
     }
 
+    if (assigner && !value) { /* It's a key line */
 
-    if (assigner && !value) {      /* Its a key line */
-      //printf("import_reg: read key name: %s\n",assigner);
-      if ( !strncmp(assigner,prefix,plen)) { /* Check and strip of prefix of key name */
+      int key_to_be_deleted = 0;
+
+      if (assigner[0] == '-') { /* [-KeyName] -> key is to be deleted */
+        key_to_be_deleted = 1;
+        assigner += 1; /* Skip '-'-characeter */
+      }
+
+      // printf("import_reg: read key name: %s\n",assigner);
+      if (!strncmp(assigner, prefix, plen)) { /* Check and strip of prefix of key name */
         assigner += plen;
       } else {
-        fprintf(stderr,"import_reg: WARNING: found key <%s> not matching prefix <%s>\n",assigner,prefix);
-        abort();
+        fprintf(stderr, "import_reg: WARNING: found key <%s> not matching prefix <%s>\n", assigner, prefix);
+        abort(); /* If it's a warning, why the abort?! Oh well.. */
       }
 
       if (numkeys) {
         if (hdesc->state & HMODE_VERBOSE)
-          printf("--- END of key, with %d values\n",numkeyvals);
+          printf("--- END of key, with %d values\n", numkeyvals);
         else
-          printf(" with %d values.\n",numkeyvals);
+          printf(" with %d values.\n", numkeyvals);
         numkeyvals = 0;
       }
 
-      printf("--- Import KEY <%s> ",assigner);
-      numkeys++;
+      key = strtok(assigner, "\\");
 
-      key = strtok(assigner,"\\");
       prevnk = hdesc->rootofs;
-      while (key) {
-        nk = trav_path(hdesc, prevnk + 4, key, TPF_NK_EXACT);
-        if (!nk) {
-          if (!add_key(hdesc, prevnk + 4, key)) {
-            fprintf(stderr,"\nERROR: import_reg: failed to add (sub)key <%s>\n",key);
-            bailout = 1;
-          } else {
-            printf(" [added <%s>] ",key);
-            nk = trav_path(hdesc, prevnk + 4, key, TPF_NK_EXACT);
-            numkeyadd++;
+
+      if (key_to_be_deleted) {
+        // Delete key
+        char *prevkey = NULL;
+        
+        printf("Key <%s> marked to be deleted recursively\n", assigner);
+        
+        while (key) {
+          nk = trav_path(hdesc, prevnk + 4, key, TPF_NK_EXACT);
+          if (!nk) {
+            /* We're not at the end but failed to traverse -> key does not exist */
+            break;
+          }
+
+          prevkey = key;
+          key = strtok(NULL, "\\");
+
+          if (key) {
+            /* We need this after we fully traversed so only set it if we're not at the end yet */
+            prevnk = nk;
           }
         }
-        prevnk = nk;
-        key = strtok(NULL,"\\");
+
+        /* if key is NULL then we found the key, the key name to delete is in prevkey. */
+        if (!key) {
+          rdel_keys(hdesc, prevkey, prevnk + 4);
+          printf("Deleted (sub)key <%s>\n", prevkey);
+        }
+
+        assigner = NULL;
+      } else {
+        // Add key
+
+        printf("--- Import KEY <%s> ", assigner);
+        numkeys++;
+
+        while (key) {
+          nk = trav_path(hdesc, prevnk + 4, key, TPF_NK_EXACT);
+          if (!nk && !key_to_be_deleted) {
+            if (!add_key(hdesc, prevnk + 4, key)) {
+              fprintf(stderr, "\nERROR: import_reg: failed to add (sub)key <%s>\n", key);
+              bailout = 1;
+            } else {
+              printf(" [added <%s>] ", key);
+              nk = trav_path(hdesc, prevnk + 4, key, TPF_NK_EXACT);
+              numkeyadd++;
+            }
+          }
+          prevnk = nk;
+          key = strtok(NULL, "\\");
+        }
       }
+
       fflush(stdout);
       VERB(hdesc,"\n");
     }
