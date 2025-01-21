@@ -3870,212 +3870,212 @@ int parse_valuestring(char *s, char *w, int len, int wide, struct keyval **kvptr
 void import_reg(struct hive *hdesc, char *filename, char *prefix)
 {
 
-    FILE *file;
-    char line[MAXLINE+2];
-    char wline[MAXLINE+2];  /* Wide buffer */
-    int l, plen;
-    char *assigner = NULL;
-    char *value = NULL;
-    int wide = 0;
-    int c,wl;
-    //    void *valbuf;
-    char *valname = NULL;
-    char *plainname = NULL;
-    char *valstr, *key, *walstr = NULL;
-    int nk, prevnk; /* offsets to nk */
-    int type,oldtype;
-    struct keyval *valbinbuf = NULL;
-    int numkeys = 0;
-    int numkeyadd = 0;
-    int numtotvals = 0;
-    int numkeyvals = 0;
-    int bailout = 0;
+  FILE *file;
+  char line[MAXLINE+2];
+  char wline[MAXLINE+2];  /* Wide buffer */
+  int l, plen;
+  char *assigner = NULL;
+  char *value = NULL;
+  int wide = 0;
+  int c,wl;
+  //    void *valbuf;
+  char *valname = NULL;
+  char *plainname = NULL;
+  char *valstr, *key, *walstr = NULL;
+  int nk, prevnk; /* offsets to nk */
+  int type,oldtype;
+  struct keyval *valbinbuf = NULL;
+  int numkeys = 0;
+  int numkeyadd = 0;
+  int numtotvals = 0;
+  int numkeyvals = 0;
+  int bailout = 0;
 
-    plen = strlen(prefix);
+  plen = strlen(prefix);
 
-    file = fopen(filename, "r");
-    if(!file)
-    {
-      fprintf(stderr,"import_reg: Cannot open file '%s'. %s (%d).\n", filename, strerror(errno),
-                errno);
-        return;
-    }
-
-    c = fgetc(file);
-
-    if (c == 0xff) { /* Wide characters file */
-      fprintf(stderr,"import_reg: WARNING: Wide character (16 bit) file..\n"
-              "import_reg: WARNING: Implementation is not 100%% accurate, some things may not import correctly!\n");
-      c = fgetc(file); /* Get second wide indicator character */
-      wide = 1;
-    } else {
-      ungetc(c, file);
-    }
-
-    line[0] = 0;
-    my_fgets(line, wline, MAXLINE, file, wide);
-    line[MAXLINE] = 0;
-
-
-    if (strncmp("Windows Registry Editor",line,23)) {
-      fprintf(stderr,"import_reg: ERROR: Windows Registry Editor signature missing on first line\n");
-      fclose(file);
+  file = fopen(filename, "r");
+  if(!file)
+  {
+    fprintf(stderr,"import_reg: Cannot open file '%s'. %s (%d).\n", filename, strerror(errno),
+              errno);
       return;
-    }
+  }
 
-    do {
+  c = fgetc(file);
 
-     l = get_line(line, wline, file, &assigner, &value, wide);
+  if (c == 0xff) { /* Wide characters file */
+    fprintf(stderr,"import_reg: WARNING: Wide character (16 bit) file..\n"
+            "import_reg: WARNING: Implementation is not 100%% accurate, some things may not import correctly!\n");
+    c = fgetc(file); /* Get second wide indicator character */
+    wide = 1;
+  } else {
+    ungetc(c, file);
+  }
 
-     if (!feof(file) && !assigner && value) {
-       //       printf("import_reg: value continuation line: %s\n",value);
-        l = strlen(value);
-        if ( *(value+l-1) == '\\' ) {  /* Strip off cont character */
-          *(value+l-1) = 0;
-          l--;
-        }
-        value = dequote(value);
-        l = strlen(value);
-        valstr = realloc(valstr, strlen(valstr) + l + 3);
-        if (valstr == NULL) {
+  line[0] = 0;
+  my_fgets(line, wline, MAXLINE, file, wide);
+  line[MAXLINE] = 0;
+
+
+  if (strncmp("Windows Registry Editor",line,23)) {
+    fprintf(stderr,"import_reg: ERROR: Windows Registry Editor signature missing on first line\n");
+    fclose(file);
+    return;
+  }
+
+  do {
+
+    l = get_line(line, wline, file, &assigner, &value, wide);
+
+    if (!feof(file) && !assigner && value) {
+      //       printf("import_reg: value continuation line: %s\n",value);
+      l = strlen(value);
+      if ( *(value+l-1) == '\\' ) {  /* Strip off cont character */
+        *(value+l-1) = 0;
+        l--;
+      }
+      value = dequote(value);
+      l = strlen(value);
+      valstr = realloc(valstr, strlen(valstr) + l + 3);
+      if (valstr == NULL) {
+        perror("import_reg: realloc(valstr)");
+        abort();
+      }
+      strcat(valstr, value);
+      //      printf("import_reg: build value string: %s\n",valstr);
+      if (wide) {
+        wl = wide_strlen(wline);
+        walstr = realloc(walstr, wide_strlen(walstr) + wl + 4);
+        if (walstr == NULL) {
           perror("import_reg: realloc(valstr)");
           abort();
         }
-        strcat(valstr, value);
-        //      printf("import_reg: build value string: %s\n",valstr);
-        if (wide) {
-          wl = wide_strlen(wline);
-          walstr = realloc(walstr, wide_strlen(walstr) + wl + 4);
-          if (walstr == NULL) {
-            perror("import_reg: realloc(valstr)");
-            abort();
-          }
-          memcpy(walstr + wl, wline, wl);
+        memcpy(walstr + wl, wline, wl);
+      }
+
+
+
+    } else {    /* End continuation, store built up value */
+      if (valname) {
+        //      printf("import_reg: end of value %s, result string: %s\n\n",valname,valstr);
+
+        type = parse_valuestring(valstr, walstr, l, wide, &valbinbuf);
+
+        //      printf("import_reg: got value type = %d\n",type);
+        //      printf("import_reg: data lenght    = %d\n",(*valbinbuf).len);
+
+        VERBF(hdesc,"  Value <%s> of type %d length %d",valname,type,(*valbinbuf).len);
+
+        oldtype = get_val_type(hdesc, nk + 4, valname, TPF_VK_ABS|TPF_EXACT);
+
+
+        if (oldtype == -1) {
+          //      printf("Value <%s> not found, creating it new\n",valname);
+          plainname = str_dup(valname);
+          de_escape(plainname,0);
+          // printf("de-escaped to <%s> creating it new\n",plainname);
+          add_value(hdesc, nk + 4, plainname, type);
+          oldtype = get_val_type(hdesc, nk + 4, valname, TPF_VK_ABS|TPF_EXACT);
+          FREE(plainname);
+          VERB(hdesc," [CREATED]");
+
         }
 
-
-
-     } else {    /* End continuation, store built up value */
-       if (valname) {
-         //      printf("import_reg: end of value %s, result string: %s\n\n",valname,valstr);
-
-         type = parse_valuestring(valstr, walstr, l, wide, &valbinbuf);
-
-         //      printf("import_reg: got value type = %d\n",type);
-         //      printf("import_reg: data lenght    = %d\n",(*valbinbuf).len);
-
-         VERBF(hdesc,"  Value <%s> of type %d length %d",valname,type,(*valbinbuf).len);
-
-         oldtype = get_val_type(hdesc, nk + 4, valname, TPF_VK_ABS|TPF_EXACT);
-
-
-         if (oldtype == -1) {
-           //      printf("Value <%s> not found, creating it new\n",valname);
-           plainname = str_dup(valname);
-           de_escape(plainname,0);
-           // printf("de-escaped to <%s> creating it new\n",plainname);
-           add_value(hdesc, nk + 4, plainname, type);
-           oldtype = get_val_type(hdesc, nk + 4, valname, TPF_VK_ABS|TPF_EXACT);
-           FREE(plainname);
-           VERB(hdesc," [CREATED]");
-
-         }
-
-         if (oldtype != type) {
-           fprintf(stderr,"ERROR: import_reg: unable to change value <%s>, new type is %d while old is %d\n",valname,type,oldtype);
-           bailout = 1;
-         } else {
-
-           VERB(hdesc,"\n");
-           put_buf2val(hdesc, valbinbuf, nk + 4, valname, type, TPF_VK_ABS|TPF_EXACT);
-
-           numkeyvals++;
-           numtotvals++;
-
-           FREE(valbinbuf);
-           FREE(valstr);
-           FREE(valname);
-           FREE(walstr);
-         }
-       }
-     }
-
-
-     if (assigner && !value) {      /* Its a key line */
-       //printf("import_reg: read key name: %s\n",assigner);
-        if ( !strncmp(assigner,prefix,plen)) { /* Check and strip of prefix of key name */
-          assigner += plen;
+        if (oldtype != type) {
+          fprintf(stderr,"ERROR: import_reg: unable to change value <%s>, new type is %d while old is %d\n",valname,type,oldtype);
+          bailout = 1;
         } else {
-          fprintf(stderr,"import_reg: WARNING: found key <%s> not matching prefix <%s>\n",assigner,prefix);
-          abort();
+
+          VERB(hdesc,"\n");
+          put_buf2val(hdesc, valbinbuf, nk + 4, valname, type, TPF_VK_ABS|TPF_EXACT);
+
+          numkeyvals++;
+          numtotvals++;
+
+          FREE(valbinbuf);
+          FREE(valstr);
+          FREE(valname);
+          FREE(walstr);
         }
+      }
+    }
 
-        if (numkeys) {
-          if (hdesc->state & HMODE_VERBOSE)
-            printf("--- END of key, with %d values\n",numkeyvals);
-          else
-            printf(" with %d values.\n",numkeyvals);
-          numkeyvals = 0;
-        }
 
-        printf("--- Import KEY <%s> ",assigner);
-        numkeys++;
+    if (assigner && !value) {      /* Its a key line */
+      //printf("import_reg: read key name: %s\n",assigner);
+      if ( !strncmp(assigner,prefix,plen)) { /* Check and strip of prefix of key name */
+        assigner += plen;
+      } else {
+        fprintf(stderr,"import_reg: WARNING: found key <%s> not matching prefix <%s>\n",assigner,prefix);
+        abort();
+      }
 
-        key = strtok(assigner,"\\");
-        prevnk = hdesc->rootofs;
-        while (key) {
-          nk = trav_path(hdesc, prevnk + 4, key, TPF_NK_EXACT);
-          if (!nk) {
-            if (!add_key(hdesc, prevnk + 4, key)) {
-              fprintf(stderr,"\nERROR: import_reg: failed to add (sub)key <%s>\n",key);
-              bailout = 1;
-            } else {
-              printf(" [added <%s>] ",key);
-              nk = trav_path(hdesc, prevnk + 4, key, TPF_NK_EXACT);
-              numkeyadd++;
-            }
+      if (numkeys) {
+        if (hdesc->state & HMODE_VERBOSE)
+          printf("--- END of key, with %d values\n",numkeyvals);
+        else
+          printf(" with %d values.\n",numkeyvals);
+        numkeyvals = 0;
+      }
+
+      printf("--- Import KEY <%s> ",assigner);
+      numkeys++;
+
+      key = strtok(assigner,"\\");
+      prevnk = hdesc->rootofs;
+      while (key) {
+        nk = trav_path(hdesc, prevnk + 4, key, TPF_NK_EXACT);
+        if (!nk) {
+          if (!add_key(hdesc, prevnk + 4, key)) {
+            fprintf(stderr,"\nERROR: import_reg: failed to add (sub)key <%s>\n",key);
+            bailout = 1;
+          } else {
+            printf(" [added <%s>] ",key);
+            nk = trav_path(hdesc, prevnk + 4, key, TPF_NK_EXACT);
+            numkeyadd++;
           }
-          prevnk = nk;
-          key = strtok(NULL,"\\");
         }
-        fflush(stdout);
-        VERB(hdesc,"\n");
-     }
+        prevnk = nk;
+        key = strtok(NULL,"\\");
+      }
+      fflush(stdout);
+      VERB(hdesc,"\n");
+    }
 
 
-     if (assigner && value) {
-       // printf("import_reg: value assignment line: %s = %s\n",assigner,value);
-       valname = str_dup(dequote(assigner));
-       if (wide) {
-         FREE(walstr);
-         ALLOC(walstr, 1, wide_strlen(wline));
-         memcpy(walstr, wline, wide_strlen(wline));
-       }
+    if (assigner && value) {
+      // printf("import_reg: value assignment line: %s = %s\n",assigner,value);
+      valname = str_dup(dequote(assigner));
+      if (wide) {
+        FREE(walstr);
+        ALLOC(walstr, 1, wide_strlen(wline));
+        memcpy(walstr, wline, wide_strlen(wline));
+      }
 
-       l = strlen(value);
-       if ( *(value+l-1) == '\\' ) {  /* Strip off cont character */
-         *(value+l-1) = 0;
-         l--;
-       }
-       value = dequote(value);
-       valstr = str_dup(value);
-       //       valbuf = NULL;
-       //printf("import_reg: val name = %s\n",valname);
-       //printf("import_reg: val str  = %s\n",valstr);
+      l = strlen(value);
+      if ( *(value+l-1) == '\\' ) {  /* Strip off cont character */
+        *(value+l-1) = 0;
+        l--;
+      }
+      value = dequote(value);
+      valstr = str_dup(value);
+      //       valbuf = NULL;
+      //printf("import_reg: val name = %s\n",valname);
+      //printf("import_reg: val str  = %s\n",valstr);
 
-     }
-
-
-    } while (!feof(file) && !bailout);
+    }
 
 
-    printf("\nEND OF IMPORT, file <%s>, operation %s!\n", filename, (bailout ? "FAILED" : "SUCCEEDED"));
-    printf("%d keys\n",numkeys);
-    printf("%d new keys added\n",numkeyadd);
-    printf("%d values total\n\n",numtotvals);
-    fclose(file);
+  } while (!feof(file) && !bailout);
 
-    if (bailout) hdesc->state &= ~HMODE_DIRTY;    /* Don't save if error. Or should we? */
+
+  printf("\nEND OF IMPORT, file <%s>, operation %s!\n", filename, (bailout ? "FAILED" : "SUCCEEDED"));
+  printf("%d keys\n",numkeys);
+  printf("%d new keys added\n",numkeyadd);
+  printf("%d values total\n\n",numtotvals);
+  fclose(file);
+
+  if (bailout) hdesc->state &= ~HMODE_DIRTY;    /* Don't save if error. Or should we? */
 
 }
 
