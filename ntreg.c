@@ -4253,118 +4253,118 @@ struct hive *openHive(char *filename, int mode)
   /* Now run through file, tallying all pages */
   /* NOTE/KLUDGE: Assume first page starts at offset 0x1000 */
 
-   pofs = 0x1000;
+  pofs = 0x1000;
 
-   hdr = (struct regf_header *)hdesc->buffer;
-   if (hdr->id != 0x66676572) {
-     fprintf(stderr,"openHive(%s): File does not seem to be a registry hive!\n",filename);
-     return(hdesc);
-   }
+  hdr = (struct regf_header *)hdesc->buffer;
+  if (hdr->id != 0x66676572) {
+    fprintf(stderr,"openHive(%s): File does not seem to be a registry hive!\n",filename);
+    return(hdesc);
+  }
 
-   checksum = calc_regfsum(hdesc);
+  checksum = calc_regfsum(hdesc);
 
 #ifdef LOAD_DEBUG
-   printf("openhive: calculated checksum: %08x\n",checksum);
-   printf("openhive: file REGF  checksum: %08x\n",hdr->checksum);
+  printf("openhive: calculated checksum: %08x\n",checksum);
+  printf("openhive: file REGF  checksum: %08x\n",hdr->checksum);
 #endif
-   if (checksum != hdr->checksum) {
-     fprintf(stderr,"openHive(%s): WARNING: REGF header checksum mismatch! calc: 0x%08x != file: 0x%08x\n",filename,checksum,hdr->checksum);
-   }
+  if (checksum != hdr->checksum) {
+    fprintf(stderr,"openHive(%s): WARNING: REGF header checksum mismatch! calc: 0x%08x != file: 0x%08x\n",filename,checksum,hdr->checksum);
+  }
 
-   hdesc->rootofs = hdr->ofs_rootkey + 0x1000;
+  hdesc->rootofs = hdr->ofs_rootkey + 0x1000;
 
-   if (info) {
-     printf("Hive <%s> name (from header): <",filename);
-     for (c = hdr->name; *c && (c < hdr->name + 64); c += 2) putchar(*c);
-     printf(">\nROOT KEY at offset: 0x%06x * ",hdesc->rootofs);
-   }
+  if (info) {
+    printf("Hive <%s> name (from header): <",filename);
+    for (c = hdr->name; *c && (c < hdr->name + 64); c += 2) putchar(*c);
+    printf(">\nROOT KEY at offset: 0x%06x * ",hdesc->rootofs);
+  }
 
-   /* Cache the roots subkey index type (li,lf,lh) so we can use the correct
-    * one when creating the first subkey in a key */
+  /* Cache the roots subkey index type (li,lf,lh) so we can use the correct
+  * one when creating the first subkey in a key */
 
-   nk = (struct nk_key *)(hdesc->buffer + hdesc->rootofs + 4);
-   if (nk->id == 0x6b6e) {
-     rikey = (struct ri_key *)(hdesc->buffer + nk->ofs_lf + 0x1004);
-     hdesc->nkindextype = rikey->id;
-     if (hdesc->nkindextype == 0x6972) {  /* Gee, big root, must check indirectly */
-       fprintf(stderr,"openHive: DEBUG: BIG ROOT!\n");
-       rikey = (struct ri_key *)(hdesc->buffer + rikey->hash[0].ofs_li + 0x1004);
-       hdesc->nkindextype = rikey->id;
-     }
-     if (hdesc->nkindextype != 0x666c &&
-         hdesc->nkindextype != 0x686c &&
-         hdesc->nkindextype != 0x696c) {
-       hdesc->nkindextype = 0x666c;
-     }
+  nk = (struct nk_key *)(hdesc->buffer + hdesc->rootofs + 4);
+  if (nk->id == 0x6b6e) {
+    rikey = (struct ri_key *)(hdesc->buffer + nk->ofs_lf + 0x1004);
+    hdesc->nkindextype = rikey->id;
+    if (hdesc->nkindextype == 0x6972) {  /* Gee, big root, must check indirectly */
+      fprintf(stderr,"openHive: DEBUG: BIG ROOT!\n");
+      rikey = (struct ri_key *)(hdesc->buffer + rikey->hash[0].ofs_li + 0x1004);
+      hdesc->nkindextype = rikey->id;
+    }
+    if (hdesc->nkindextype != 0x666c &&
+        hdesc->nkindextype != 0x686c &&
+        hdesc->nkindextype != 0x696c) {
+      hdesc->nkindextype = 0x666c;
+    }
 
-     if (info) printf("Subkey indexing type is: %04x <%c%c>\n",
-            hdesc->nkindextype,
-            hdesc->nkindextype & 0xff,
-            hdesc->nkindextype >> 8);
-   } else {
-     fprintf(stderr,"openHive: WARNING: ROOT key does not seem to be a key! (not type == nk)\n");
-   }
+    if (info) printf("Subkey indexing type is: %04x <%c%c>\n",
+          hdesc->nkindextype,
+          hdesc->nkindextype & 0xff,
+          hdesc->nkindextype >> 8);
+  } else {
+    fprintf(stderr,"openHive: WARNING: ROOT key does not seem to be a key! (not type == nk)\n");
+  }
 
 
-   while (pofs < hdr->filesize + 0x1000) {   /* Loop through hbins until end according to regf header */
+  while (pofs < hdr->filesize + 0x1000) {   /* Loop through hbins until end according to regf header */
 #ifdef LOAD_DEBUG
-     int htrace = 1;
-     //     if (htrace) hexdump(hdesc->buffer,pofs,pofs+0x20,1);
+    int htrace = 1;
+    //     if (htrace) hexdump(hdesc->buffer,pofs,pofs+0x20,1);
 #endif
-     p = (struct hbin_page *)(hdesc->buffer + pofs);
-     if (p->id != 0x6E696268) {
-       if (info) printf("Page at 0x%x is not 'hbin', assuming file contains garbage at end\n",pofs);
-       break;
-     }
-     hdesc->pages++;
+    p = (struct hbin_page *)(hdesc->buffer + pofs);
+    if (p->id != 0x6E696268) {
+      if (info) printf("Page at 0x%x is not 'hbin', assuming file contains garbage at end\n",pofs);
+      break;
+    }
+    hdesc->pages++;
 
-     if (verbose) printf("###### Page at 0x%0x ofs_self 0x%0x, size (delta ofs_next) 0x%0x ######\n",
-                        pofs,p->ofs_self,p->ofs_next);
+    if (verbose) printf("###### Page at 0x%0x ofs_self 0x%0x, size (delta ofs_next) 0x%0x ######\n",
+                      pofs,p->ofs_self,p->ofs_next);
 
-     if (p->ofs_next == 0) {
-       fprintf(stderr,"openHive: ERROR: Page at 0x%x has size zero! File may be corrupt, or program has a bug\n",pofs);
-       return(hdesc);
-     }
-
-
-     vofs = pofs + 0x20; /* Skip page header, and run through blocks in hbin */
-
-     while (vofs-pofs < p->ofs_next && vofs < hdesc->size) {
-       vofs += parse_block(hdesc,vofs,trace);
-
-     }
-
-     pofs += p->ofs_next;
-
-   } /* hbin loop */
+    if (p->ofs_next == 0) {
+      fprintf(stderr,"openHive: ERROR: Page at 0x%x has size zero! File may be corrupt, or program has a bug\n",pofs);
+      return(hdesc);
+    }
 
 
-   hdesc->endofs  = hdr->filesize + 0x1000;
-   hdesc->lastbin = pofs - p->ofs_next;  /* Compensate for loop that added at end above */
+    vofs = pofs + 0x20; /* Skip page header, and run through blocks in hbin */
 
-   if (verbose) {
-     printf("Last HBIN at offset       : 0x%x\n",hdesc->lastbin);
-     printf("First non-HBIN page offset: 0x%x\n",hdesc->endofs);
-     printf("hdr->unknown4 (version?)  : 0x%x\n",hdr->unknown4);
-   }
+    while (vofs-pofs < p->ofs_next && vofs < hdesc->size) {
+      vofs += parse_block(hdesc,vofs,trace);
 
-   if (info || verbose) {
-     printf("File size %d [%x] bytes, containing %d pages (+ 1 headerpage)\n",hdesc->size,hdesc->size, hdesc->pages);
-     printf("Used for data: %d/%d blocks/bytes, unused: %d/%d blocks/bytes.\n\n",
-            hdesc->useblk,hdesc->usetot,hdesc->unuseblk,hdesc->unusetot);
-   }
+    }
 
-   /* So, let's guess what kind of hive this is, based on keys in its root */
+    pofs += p->ofs_next;
 
-   hdesc->type = HTYPE_UNKNOWN;
+  } /* hbin loop */
 
-   if (trav_path(hdesc, 0, "\\SAM", 0)) hdesc->type = HTYPE_SAM;
-   else if (trav_path(hdesc, 0, "\\ControlSet", 0)) hdesc->type = HTYPE_SYSTEM;
-   else if (trav_path(hdesc, 0, "\\Policy", 0)) hdesc->type = HTYPE_SECURITY;
-   else if (trav_path(hdesc, 0, "\\Microsoft", 0)) hdesc->type = HTYPE_SOFTWARE;
-   if (verbose) printf("Type of hive guessed to be: %d\n",hdesc->type);
 
-   return(hdesc);
+  hdesc->endofs  = hdr->filesize + 0x1000;
+  hdesc->lastbin = pofs - p->ofs_next;  /* Compensate for loop that added at end above */
+
+  if (verbose) {
+    printf("Last HBIN at offset       : 0x%x\n",hdesc->lastbin);
+    printf("First non-HBIN page offset: 0x%x\n",hdesc->endofs);
+    printf("hdr->unknown4 (version?)  : 0x%x\n",hdr->unknown4);
+  }
+
+  if (info || verbose) {
+    printf("File size %d [%x] bytes, containing %d pages (+ 1 headerpage)\n",hdesc->size,hdesc->size, hdesc->pages);
+    printf("Used for data: %d/%d blocks/bytes, unused: %d/%d blocks/bytes.\n\n",
+          hdesc->useblk,hdesc->usetot,hdesc->unuseblk,hdesc->unusetot);
+  }
+
+  /* So, let's guess what kind of hive this is, based on keys in its root */
+
+  hdesc->type = HTYPE_UNKNOWN;
+
+  if (trav_path(hdesc, 0, "\\SAM", 0)) hdesc->type = HTYPE_SAM;
+  else if (trav_path(hdesc, 0, "\\ControlSet", 0)) hdesc->type = HTYPE_SYSTEM;
+  else if (trav_path(hdesc, 0, "\\Policy", 0)) hdesc->type = HTYPE_SECURITY;
+  else if (trav_path(hdesc, 0, "\\Microsoft", 0)) hdesc->type = HTYPE_SOFTWARE;
+  if (verbose) printf("Type of hive guessed to be: %d\n",hdesc->type);
+
+  return(hdesc);
 
 }
 
